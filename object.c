@@ -94,11 +94,65 @@ int object_exists(const ObjectID *id) {
 //
 // Returns 0 on success, -1 on error.
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
-    // TODO: Implement
-    (void)type; (void)data; (void)len; (void)id_out;
-    return -1;
-}
+    unsigned char hash[32];
+    char header[64];
+    const char *type_str;
 
+    // Convert enum to string
+    if (type == OBJ_BLOB) type_str = "blob";
+    else return -1;
+
+    // Create header "type len\0"
+    int header_len = snprintf(header, sizeof(header), "%s %zu", type_str, len) + 1;
+
+    size_t total_size = header_len + len;
+    unsigned char *buffer = malloc(total_size);
+    if (!buffer) return -1;
+
+    memcpy(buffer, header, header_len);
+    memcpy(buffer + header_len, data, len);
+
+    // Compute SHA256
+    SHA256(buffer, total_size, hash);
+
+    // Store hash in ObjectID
+    memcpy(id_out->bytes, hash, 32);
+
+    // Convert to hex for file path
+    char hex[65];
+    for (int i = 0; i < 32; i++) {
+        sprintf(hex + i * 2, "%02x", hash[i]);
+    }
+    hex[64] = '\0';
+
+    // Create directories
+    mkdir(".pes", 0755);
+    mkdir(".pes/objects", 0755);
+
+    char dir[256];
+    snprintf(dir, sizeof(dir), ".pes/objects/%.2s", hex);
+    mkdir(dir, 0755);
+
+    // File path
+    char path[256], tmp_path[256];
+    snprintf(path, sizeof(path), "%s/%s", dir, hex + 2);
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+
+    // Write object
+    FILE *f = fopen(tmp_path, "wb");
+    if (!f) {
+        free(buffer);
+        return -1;
+    }
+
+    fwrite(buffer, 1, total_size, f);
+    fclose(f);
+
+    rename(tmp_path, path);
+
+    free(buffer);
+    return 0;
+}
 // Read an object from the store.
 //
 // Steps:
@@ -122,7 +176,63 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
 // The caller is responsible for calling free(*data_out).
 // Returns 0 on success, -1 on error (file not found, corrupt, etc.).
 int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out) {
-    // TODO: Implement
-    (void)id; (void)type_out; (void)data_out; (void)len_out;
-    return -1;
+    char hex[65];
+
+    // Convert binary hash → hex string
+    for (int i = 0; i < 32; i++) {
+        sprintf(hex + i * 2, "%02x", id->bytes[i]);
+    }
+    hex[64] = '\0';
+
+    // Build file path
+    char path[256];
+    snprintf(path, sizeof(path), ".pes/objects/%.2s/%s", hex, hex + 2);
+
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+
+    // Get file size
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    rewind(f);
+
+    unsigned char *buffer = malloc(file_size);
+    if (!buffer) {
+        fclose(f);
+        return -1;
+    }
+
+    fread(buffer, 1, file_size, f);
+    fclose(f);
+
+    // Find end of header
+    char *header_end = memchr(buffer, '\0', file_size);
+    if (!header_end) {
+        free(buffer);
+        return -1;
+    }
+
+    // Parse header
+    char type_str[16];
+    sscanf((char *)buffer, "%s %zu", type_str, len_out);
+
+    // Convert string → enum
+    if (strcmp(type_str, "blob") == 0) {
+        *type_out = OBJ_BLOB;
+    } else {
+        free(buffer);
+        return -1;
+    }
+
+    // Allocate and copy data
+    *data_out = malloc(*len_out);
+    if (!(*data_out)) {
+        free(buffer);
+        return -1;
+    }
+
+    memcpy(*data_out, header_end + 1, *len_out);
+
+    free(buffer);
+    return 0;
 }

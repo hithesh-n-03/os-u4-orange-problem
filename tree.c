@@ -129,9 +129,86 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 //   - object_write    : save that binary buffer to the store as OBJ_TREE
 //
 // Returns 0 on success, -1 on error.
+
+int write_tree_recursive(IndexEntry *entries, size_t count, ObjectID *out_id, const char *prefix) {
+    unsigned char buffer[8192];
+    unsigned char *ptr = buffer;
+
+    for (size_t i = 0; i < count; i++) {
+        const char *path = entries[i].path;
+
+        // Skip if not matching current prefix
+        if (prefix) {
+            if (strncmp(path, prefix, strlen(prefix)) != 0)
+                continue;
+        }
+
+        const char *relative = prefix ? path + strlen(prefix) : path;
+
+        char *slash = strchr(relative, '/');
+
+        if (!slash) {
+            // FILE entry
+            int n = sprintf((char *)ptr, "100644 %s", relative);
+            ptr += n;
+            *ptr++ = '\0';
+
+            memcpy(ptr, entries[i].id.bytes, 32);
+            ptr += 32;
+        } else {
+            // DIRECTORY entry
+            char dirname[256];
+            size_t len = slash - relative;
+            strncpy(dirname, relative, len);
+            dirname[len] = '\0';
+
+            // Avoid duplicate directories
+            int already_done = 0;
+            for (size_t j = 0; j < i; j++) {
+                if (prefix && strncmp(entries[j].path, prefix, strlen(prefix)) != 0)
+                    continue;
+
+                const char *rel2 = prefix ? entries[j].path + strlen(prefix) : entries[j].path;
+
+                if (strncmp(rel2, dirname, len) == 0 && rel2[len] == '/') {
+                    already_done = 1;
+                    break;
+                }
+            }
+            if (already_done) continue;
+
+            // Build new prefix
+            char new_prefix[256];
+            if (prefix)
+                snprintf(new_prefix, sizeof(new_prefix), "%s%s/", prefix, dirname);
+            else
+                snprintf(new_prefix, sizeof(new_prefix), "%s/", dirname);
+
+            ObjectID sub_id;
+            if (write_tree_recursive(entries, count, &sub_id, new_prefix) != 0)
+                return -1;
+
+            int n = sprintf((char *)ptr, "40000 %s", dirname);
+            ptr += n;
+            *ptr++ = '\0';
+
+            memcpy(ptr, sub_id.bytes, 32);
+            ptr += 32;
+        }
+    }
+
+    size_t size = ptr - buffer;
+
+    return object_write(OBJ_TREE, buffer, size, out_id);
+}
 int tree_from_index(ObjectID *id_out) {
-    // TODO: Implement recursive tree building
-    // (See Lab Appendix for logical steps)
-    (void)id_out;
-    return -1;
+    Index index;
+
+    if (index_load(&index) != 0)
+        return -1;
+
+    if (index.count == 0)
+        return -1;
+
+    return write_tree_recursive(index.entries, index.count, id_out, NULL);
 }

@@ -16,7 +16,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <openssl/evp.h>
-#include <openssl/sha.h>
 
 // ─── PROVIDED ────────────────────────────────────────────────────────────────
 
@@ -99,11 +98,11 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     char header[64];
     const char *type_str;
 
-    // Convert enum to string
     if (type == OBJ_BLOB) type_str = "blob";
+    else if (type == OBJ_TREE) type_str = "tree";
+    else if (type == OBJ_COMMIT) type_str = "commit";
     else return -1;
 
-    // Create header "type len\0"
     int header_len = snprintf(header, sizeof(header), "%s %zu", type_str, len) + 1;
 
     size_t total_size = header_len + len;
@@ -113,20 +112,14 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     memcpy(buffer, header, header_len);
     memcpy(buffer + header_len, data, len);
 
-    // Compute SHA256
     SHA256(buffer, total_size, hash);
-
-    // Store hash in ObjectID
     memcpy(id_out->bytes, hash, 32);
 
-    // Convert to hex for file path
     char hex[65];
-    for (int i = 0; i < 32; i++) {
+    for (int i = 0; i < 32; i++)
         sprintf(hex + i * 2, "%02x", hash[i]);
-    }
     hex[64] = '\0';
 
-    // Create directories
     mkdir(".pes", 0755);
     mkdir(".pes/objects", 0755);
 
@@ -134,12 +127,14 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     snprintf(dir, sizeof(dir), ".pes/objects/%.2s", hex);
     mkdir(dir, 0755);
 
-    // File path
     char path[256], tmp_path[256];
-    snprintf(path, sizeof(path), "%s/%s", dir, hex + 2);
-    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
 
-    // Write object
+    if (snprintf(path, sizeof(path), "%s/%s", dir, hex + 2) >= sizeof(path))
+        return -1;
+
+    if (snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path) >= sizeof(tmp_path))
+        return -1;
+
     FILE *f = fopen(tmp_path, "wb");
     if (!f) {
         free(buffer);
@@ -179,59 +174,49 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
 int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out) {
     char hex[65];
 
-    // Convert binary hash → hex string
-    for (int i = 0; i < 32; i++) {
+    for (int i = 0; i < 32; i++)
         sprintf(hex + i * 2, "%02x", id->bytes[i]);
-    }
     hex[64] = '\0';
 
-    // Build file path
     char path[256];
     snprintf(path, sizeof(path), ".pes/objects/%.2s/%s", hex, hex + 2);
 
     FILE *f = fopen(path, "rb");
     if (!f) return -1;
 
-    // Get file size
     fseek(f, 0, SEEK_END);
-    long file_size = ftell(f);
+    long size = ftell(f);
     rewind(f);
 
-    unsigned char *buffer = malloc(file_size);
+    unsigned char *buffer = malloc(size);
     if (!buffer) {
         fclose(f);
         return -1;
     }
 
-    fread(buffer, 1, file_size, f);
+    if (fread(buffer, 1, size, f) != size) {
+        free(buffer);
+        fclose(f);
+        return -1;
+    }
+
     fclose(f);
 
-    // Find end of header
-    char *header_end = memchr(buffer, '\0', file_size);
+    char *header_end = memchr(buffer, '\0', size);
     if (!header_end) {
         free(buffer);
         return -1;
     }
 
-    // Parse header
     char type_str[16];
     sscanf((char *)buffer, "%s %zu", type_str, len_out);
 
-    // Convert string → enum
-    if (strcmp(type_str, "blob") == 0) {
-        *type_out = OBJ_BLOB;
-    } else {
-        free(buffer);
-        return -1;
-    }
+    if (strcmp(type_str, "blob") == 0) *type_out = OBJ_BLOB;
+    else if (strcmp(type_str, "tree") == 0) *type_out = OBJ_TREE;
+    else if (strcmp(type_str, "commit") == 0) *type_out = OBJ_COMMIT;
+    else return -1;
 
-    // Allocate and copy data
     *data_out = malloc(*len_out);
-    if (!(*data_out)) {
-        free(buffer);
-        return -1;
-    }
-
     memcpy(*data_out, header_end + 1, *len_out);
 
     free(buffer);

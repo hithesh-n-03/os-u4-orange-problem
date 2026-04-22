@@ -98,11 +98,15 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     char header[64];
     const char *type_str;
 
-    if (type == OBJ_BLOB) type_str = "blob";
-    else if (type == OBJ_TREE) type_str = "tree";
-    else if (type == OBJ_COMMIT) type_str = "commit";
-    else return -1;
+    // Fix type mapping
+    switch (type) {
+        case OBJ_BLOB: type_str = "blob"; break;
+        case OBJ_TREE: type_str = "tree"; break;
+        case OBJ_COMMIT: type_str = "commit"; break;
+        default: return -1;
+    }
 
+    // Correct header
     int header_len = snprintf(header, sizeof(header), "%s %zu", type_str, len) + 1;
 
     size_t total_size = header_len + len;
@@ -112,14 +116,19 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     memcpy(buffer, header, header_len);
     memcpy(buffer + header_len, data, len);
 
+    // SHA256
     SHA256(buffer, total_size, hash);
+
+    // Store binary hash
     memcpy(id_out->bytes, hash, 32);
 
+    // Convert to hex
     char hex[65];
     for (int i = 0; i < 32; i++)
         sprintf(hex + i * 2, "%02x", hash[i]);
     hex[64] = '\0';
 
+    // Create directories
     mkdir(".pes", 0755);
     mkdir(".pes/objects", 0755);
 
@@ -129,11 +138,15 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
 
     char path[256], tmp_path[256];
 
-    if (snprintf(path, sizeof(path), "%s/%s", dir, hex + 2) >= sizeof(path))
+    if (snprintf(path, sizeof(path), "%s/%s", dir, hex + 2) >= sizeof(path)) {
+        free(buffer);
         return -1;
+    }
 
-    if (snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path) >= sizeof(tmp_path))
+    if (snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path) >= sizeof(tmp_path)) {
+        free(buffer);
         return -1;
+    }
 
     FILE *f = fopen(tmp_path, "wb");
     if (!f) {

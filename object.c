@@ -161,6 +161,15 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
 
     rename(tmp_path, path);
 
+// fsync directory (CRITICAL STEP)
+int dir_fd = open(dir, O_DIRECTORY);
+if (dir_fd >= 0) {
+    fsync(dir_fd);
+    close(dir_fd);
+}
+
+free(buffer);
+return 0;
     free(buffer);
     return 0;
 }

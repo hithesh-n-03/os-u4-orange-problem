@@ -138,22 +138,20 @@ int index_load(Index *index) {
     FILE *f = fopen(".pes/index", "r");
     if (!f) {
         index->count = 0;
-        return 0; // no index yet is OK
+        return 0;
     }
 
     index->count = 0;
-
     char line[512];
+
     while (fgets(line, sizeof(line), f)) {
         IndexEntry *e = &index->entries[index->count];
 
         char hex[65];
         sscanf(line, "%64s %255[^\n]", hex, e->path);
 
-        // Convert hex → binary
-        for (int i = 0; i < 32; i++) {
+        for (int i = 0; i < 32; i++)
             sscanf(hex + i * 2, "%2hhx", &e->id.bytes[i]);
-        }
 
         index->count++;
     }
@@ -179,16 +177,12 @@ int index_save(const Index *index) {
     if (!f) return -1;
 
     for (size_t i = 0; i < index->count; i++) {
-        const IndexEntry *e = &index->entries[i];
-
-        // Convert hash → hex
         char hex[65];
-        for (int j = 0; j < 32; j++) {
-            sprintf(hex + j * 2, "%02x", e->id.bytes[j]);
-        }
-        hex[64] = '\0';
 
-        fprintf(f, "%s %s\n", hex, e->path);
+        for (int j = 0; j < 32; j++)
+            sprintf(hex + j * 2, "%02x", index->entries[i].id.bytes[j]);
+
+        fprintf(f, "%s %s\n", hex, index->entries[i].path);
     }
 
     fclose(f);
@@ -208,7 +202,6 @@ int index_add(Index *index, const char *path) {
     FILE *f = fopen(path, "rb");
     if (!f) return -1;
 
-    // Read file content
     fseek(f, 0, SEEK_END);
     size_t size = ftell(f);
     rewind(f);
@@ -217,15 +210,12 @@ int index_add(Index *index, const char *path) {
     fread(data, 1, size, f);
     fclose(f);
 
-    // Create blob object
     ObjectID id;
-    if (object_write(OBJ_BLOB, data, size, &id) != 0) {
-        free(data);
+    if (object_write(OBJ_BLOB, data, size, &id) != 0)
         return -1;
-    }
+
     free(data);
 
-    // Check if file already exists → update
     for (size_t i = 0; i < index->count; i++) {
         if (strcmp(index->entries[i].path, path) == 0) {
             index->entries[i].id = id;
@@ -233,7 +223,6 @@ int index_add(Index *index, const char *path) {
         }
     }
 
-    // Add new entry
     IndexEntry *e = &index->entries[index->count++];
     strcpy(e->path, path);
     e->id = id;

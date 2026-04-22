@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <openssl/evp.h>
+#include <openssl/sha.h>
 
 // ─── PROVIDED ────────────────────────────────────────────────────────────────
 

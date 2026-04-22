@@ -135,10 +135,31 @@ int index_status(const Index *index) {
 //
 // Returns 0 on success, -1 on error.
 int index_load(Index *index) {
-    // TODO: Implement index loading
-    // (See Lab Appendix for logical steps)
-    (void)index;
-    return -1;
+    FILE *f = fopen(".pes/index", "r");
+    if (!f) {
+        index->count = 0;
+        return 0; // no index yet is OK
+    }
+
+    index->count = 0;
+
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        IndexEntry *e = &index->entries[index->count];
+
+        char hex[65];
+        sscanf(line, "%64s %255[^\n]", hex, e->path);
+
+        // Convert hex → binary
+        for (int i = 0; i < 32; i++) {
+            sscanf(hex + i * 2, "%2hhx", &e->id.bytes[i]);
+        }
+
+        index->count++;
+    }
+
+    fclose(f);
+    return 0;
 }
 
 // Save the index to .pes/index atomically.
@@ -152,10 +173,26 @@ int index_load(Index *index) {
 //
 // Returns 0 on success, -1 on error.
 int index_save(const Index *index) {
-    // TODO: Implement atomic index saving
-    // (See Lab Appendix for logical steps)
-    (void)index;
-    return -1;
+    mkdir(".pes", 0755);
+
+    FILE *f = fopen(".pes/index", "w");
+    if (!f) return -1;
+
+    for (size_t i = 0; i < index->count; i++) {
+        const IndexEntry *e = &index->entries[i];
+
+        // Convert hash → hex
+        char hex[65];
+        for (int j = 0; j < 32; j++) {
+            sprintf(hex + j * 2, "%02x", e->id.bytes[j]);
+        }
+        hex[64] = '\0';
+
+        fprintf(f, "%s %s\n", hex, e->path);
+    }
+
+    fclose(f);
+    return 0;
 }
 
 // Stage a file for the next commit.
@@ -168,8 +205,38 @@ int index_save(const Index *index) {
 //
 // Returns 0 on success, -1 on error.
 int index_add(Index *index, const char *path) {
-    // TODO: Implement file staging
-    // (See Lab Appendix for logical steps)
-    (void)index; (void)path;
-    return -1;
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+
+    // Read file content
+    fseek(f, 0, SEEK_END);
+    size_t size = ftell(f);
+    rewind(f);
+
+    void *data = malloc(size);
+    fread(data, 1, size, f);
+    fclose(f);
+
+    // Create blob object
+    ObjectID id;
+    if (object_write(OBJ_BLOB, data, size, &id) != 0) {
+        free(data);
+        return -1;
+    }
+    free(data);
+
+    // Check if file already exists → update
+    for (size_t i = 0; i < index->count; i++) {
+        if (strcmp(index->entries[i].path, path) == 0) {
+            index->entries[i].id = id;
+            return 0;
+        }
+    }
+
+    // Add new entry
+    IndexEntry *e = &index->entries[index->count++];
+    strcpy(e->path, path);
+    e->id = id;
+
+    return 0;
 }

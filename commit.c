@@ -193,38 +193,36 @@ int head_update(const ObjectID *new_commit) {
 //   - head_update       : moves the branch pointer to your new commit
 //
 // Returns 0 on success, -1 on error.
-int commit_create(const char *message, ObjectID *commit_id) {
-    if (!message) return -1;
+#include <time.h>
 
-    // Step 1: Build tree
+int commit_create(const char *message, ObjectID *commit_id) {
     ObjectID tree_id;
+
     if (tree_from_index(&tree_id) != 0)
         return -1;
 
-    // Step 2: Convert tree hash to hex
     char tree_hex[65];
-    for (int i = 0; i < 32; i++) {
+    for (int i = 0; i < 32; i++)
         sprintf(tree_hex + i * 2, "%02x", tree_id.bytes[i]);
-    }
-    tree_hex[64] = '\0';
 
-    // Step 3: Get author
     const char *author = getenv("PES_AUTHOR");
     if (!author) author = "unknown";
 
-    // Step 4: Build commit content
-    char buffer[1024];
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+
+    char date[128];
+    strftime(date, sizeof(date), "%a %b %d %H:%M:%S %Y %z", t);
+
+    char buffer[2048];
     int len = snprintf(buffer, sizeof(buffer),
         "tree %s\n"
         "author %s\n"
+        "date %s\n"
         "\n"
         "%s\n",
-        tree_hex, author, message
+        tree_hex, author, date, message
     );
 
-    // Step 5: Write commit object
-    if (object_write(OBJ_COMMIT, buffer, len, commit_id) != 0)
-        return -1;
-
-    return 0;
+    return object_write(OBJ_COMMIT, buffer, len, commit_id);
 }
